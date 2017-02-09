@@ -1,0 +1,133 @@
+---
+title: "CourseProjectML"
+author: "Lauro Silva"
+date: "8 de fevereiro de 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+##  Introduction
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, our goal is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. The data use to perform the machine learning algorithms come from this source: http://groupware.les.inf.puc-rio.br/har.
+
+
+## Analysis
+
+### Getting and Cleanig Data
+
+The training data used in this paper is available at:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data was obtain from:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+After downloading these data sets, we eliminate all columns and lines that had more them a half of missing or null values. We used the above cod to do that.
+
+```{r GettingAndCleanigData}
+library(dplyr)
+setwd("~/Dropbox/Data Science Specialization/Practical Machine Learnning")
+scoringData <- read.table("pml-testing.csv", header = TRUE, sep = ",")
+workingData <- read.table("pml-training.csv", header = TRUE, sep = ",")
+almostEmpty <- 0
+for (i in 1:160){
+  NAs <- sum(is.na(workingData[,i]))
+  Nulos <- sum(ifelse(workingData[,i]=="",1,0))
+  if (NAs > 8000 || Nulos > 8000){
+    almostEmpty <-  rbind(almostEmpty,i)
+  }
+}
+
+workingData <- select(workingData, -almostEmpty)
+scoringData <- select(scoringData, -almostEmpty)
+scoringData <- scoringData[complete.cases(scoringData),]
+workingData <- workingData[complete.cases(workingData),]
+```
+
+In this paper we generate some random numbers. In order to make this research reproducible, before we start making calculations we set a seed and load some important libraries.
+
+```{r librariesNseed}
+library(randomForest)
+library(ggplot2)
+library(caret)
+set.seed(1234)
+```
+
+After that, we made some data partition to guarantee the cross validation approach. In these case we create 3 data partitions:
+
+- training
+- testing
+- validation
+
+```{r crossValidation}
+inBuild <- createDataPartition(y=workingData$classe, p = 0.7, list= FALSE)
+validation <- workingData[-inBuild,]
+buildData <- workingData[inBuild,]
+inTrain <- createDataPartition(y=buildData$classe, p = 0.7, list =FALSE)
+training <- buildData[inTrain,]
+testing <- buildData[-inTrain,]
+```
+
+### Approach
+
+We decide to combine similar classifiers: Random Forest, Boosting and Bagging. Hence, the first step was to obtain the models through fitting the training data set.The first model was fit by a random forest method and the second we used a bagging procedure.
+
+```{r modelFitting}
+training$classe <- factor(as.character(training$classe))
+modFit1 <- randomForest(classe ~. , data=training)
+modFit2 <- train(classe ~. , method = "treebag", data = training)
+```
+
+Then, we obtain the prediction for these models.
+
+```{r predictions}
+pred1 <- predict(modFit1, testing)
+pred2 <- predict(modFit2, testing)
+```
+
+In order to combine these models, we used a boosting algorithm.
+
+```{r modelFittingWithEnsamblePredictors}
+predDF <- data.frame(pred1, pred2, classe = testing$classe)
+combModFit <- train(classe ~., method = "gbm", data=predDF, verbose = FALSE)
+```
+
+We did not predict using the predDF because we already use the testing data set.
+
+```{r obtainingFinalPredictions}
+pred1V <- predict(modFit1, validation)
+pred2V <- predict(modFit2, validation)
+predDFV <- data.frame(pred1 = pred1V, pred2 = pred2V, classe = validation$classe)
+combPredV <- predict(combModFit, predDFV)
+```
+
+To see how these models perform, we construct some matrices comparing the predict results of each model to the actual values.
+
+Random Forest
+```{r}
+table (pred1V, validation$classe)
+```
+
+For this model the accuracy rate was 100% (This is amazing, uh?)
+
+Bagging
+```{r}
+table (pred2V, validation$classe)
+```
+
+For this model the accuracy rate was also very good. Just one missing shot.
+
+Combined Predictors with boosting.
+```{r}
+table (combPredV, validation$classe)
+```
+
+As we should expect from the amazing performance of random forest, The ensemble procedure perform just as good as the random forest.
+
+## Conclusions
+
+As we can see through the accuracy. The model base on random forest is the best model to predict the attribute "classe". Although the ensemble procedure obtain the same results, it has much more computational complexity to make those predictions.
